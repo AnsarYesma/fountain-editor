@@ -1,0 +1,930 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fountain Editor · ansar.kz</title>
+<style>
+  :root{
+    --bg:#1c1d21; --chrome:#25262b; --line:#34363d; --ink:#e8e8ea;
+    --muted:#9a9ca4; --accent:#e0b25a; --editor-bg:#202127; --editor-ink:#d6d7db;
+    --paper:#fbfbf9; --paper-ink:#17171a; --paper-faint:#8a8a86; --paper-line:#d8d8d2;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--ink); overflow:hidden;
+    display:flex; flex-direction:column;
+  }
+
+  /* ---- top bar ---- */
+  header{
+    display:flex; align-items:center; gap:14px; padding:10px 16px;
+    background:var(--chrome); border-bottom:1px solid var(--line); flex:0 0 auto;
+  }
+  .brand{display:flex; align-items:baseline; gap:8px; margin-right:6px}
+  .brand b{font-size:15px; letter-spacing:.02em}
+  .brand span{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.14em}
+  .brand .ver{font-size:10px; color:var(--accent); border:1px solid var(--line); border-radius:5px; padding:1px 5px; text-transform:none; letter-spacing:.04em}
+  header .spacer{flex:1}
+  button.tool{
+    background:#2f3037; color:var(--ink); border:1px solid var(--line);
+    padding:6px 12px; border-radius:7px; font-size:13px; cursor:pointer;
+  }
+  button.tool:hover{background:#3a3b43; border-color:#4a4c55}
+  button.tool.primary{background:var(--accent); color:#1c1400; border-color:var(--accent); font-weight:600}
+  button.tool.primary:hover{filter:brightness(1.06)}
+  button.tool.off{opacity:.5}
+  .status{font-size:12px; color:var(--muted); min-width:120px; text-align:right}
+  .status b{color:var(--accent); font-weight:600}
+  #previewBtn{margin-left:14px}
+
+  /* ---- color popover ---- */
+  #colorPanel{
+    position:fixed; z-index:30; display:none; background:var(--chrome); border:1px solid var(--line);
+    border-radius:10px; padding:14px 16px 16px; box-shadow:0 14px 44px rgba(0,0,0,.5); min-width:252px;
+  }
+  #colorPanel.show{display:block}
+  #colorPanel h4{margin:0 0 12px; font-size:10px; text-transform:uppercase; letter-spacing:.16em; color:var(--muted)}
+  #colorPanel .swatches{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .swatch{display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid var(--line);
+    border-radius:8px; padding:9px 11px; cursor:pointer; font:12px "Courier New",Courier,monospace}
+  .swatch:hover{border-color:#5a5c66}
+  .swatch.active{outline:2px solid var(--accent); border-color:var(--accent)}
+  .swatch .aa{font-weight:700; font-size:13px}
+
+  /* ---- body ---- */
+  main{flex:1; display:flex; min-height:0}
+  #nav{
+    width:210px; flex:0 0 auto; background:var(--editor-bg); border-right:1px solid var(--line);
+    overflow-y:auto; padding:12px 0; transition:margin-left .18s ease;
+  }
+  #nav.hidden{margin-left:-210px}
+  #nav h3{font-size:10px; text-transform:uppercase; letter-spacing:.16em; color:var(--muted); margin:6px 16px 8px}
+  .navitem{
+    display:block; width:100%; text-align:left; background:none; border:0; color:var(--editor-ink);
+    padding:6px 16px; font-size:12.5px; cursor:pointer; border-left:2px solid transparent; line-height:1.3;
+  }
+  .navitem:hover{background:rgba(128,128,128,.18)}
+  .navitem.section{color:var(--accent); font-weight:600; text-transform:uppercase; letter-spacing:.04em; font-size:11px}
+  .navitem .num{color:var(--muted); margin-right:8px; font-variant-numeric:tabular-nums}
+
+  .panes{flex:1; display:flex; min-width:0}
+  .pane{min-width:0; display:flex; flex-direction:column}
+  #editorPane{flex:0 0 50%}
+  #previewPane{flex:1 1 0}
+  .splitter{flex:0 0 7px; background:var(--line); cursor:col-resize; position:relative; z-index:5}
+  .splitter::after{content:""; position:absolute; top:0; bottom:0; left:-4px; right:-4px}
+  .splitter:hover, body.dragging .splitter{background:var(--accent)}
+  body.dragging{cursor:col-resize; user-select:none}
+  body.dragging #editor, body.dragging #previewWrap{pointer-events:none}
+  .panehead{
+    font-size:10px; text-transform:uppercase; letter-spacing:.16em; color:var(--muted);
+    padding:8px 16px; border-bottom:1px solid var(--line); background:#202127; flex:0 0 auto;
+  }
+  #editor{
+    flex:1; width:100%; resize:none; border:0; outline:0; background:var(--editor-bg); color:var(--editor-ink);
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace; font-size:14px; line-height:1.6;
+    padding:22px 26px 45vh; tab-size:4;
+  }
+  #previewWrap{flex:1; overflow-y:auto; overflow-x:hidden; background:#141419; padding:26px 12px 45vh; container-type:inline-size}
+
+  /* ---- rendered screenplay ---- */
+  .page{
+    width:72ch; max-width:100%; margin:0 auto; background:var(--paper); color:var(--paper-ink);
+    font-family:"Courier New",Courier,monospace; font-size:clamp(10px, 2.15cqi, 26px); line-height:1.5;
+    padding:5ch 6ch 7ch; border-radius:2px; box-shadow:0 6px 30px rgba(0,0,0,.45);
+  }
+  .titlepage{text-align:center; padding:6ch 0 7ch; border-bottom:1px dashed var(--paper-line); margin-bottom:3ch}
+  .titlepage .t{font-size:20px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:2.4ch}
+  .titlepage .m{font-size:14px; margin:.3ch 0; color:var(--paper-ink)}
+  .titlepage .contact{margin-top:3ch; font-size:13px; color:var(--paper-faint)}
+
+  .page > *:first-child{margin-top:0}
+  .scene{text-transform:uppercase; font-weight:700; margin:2.2em 0 1em; scroll-margin-top:14px}
+  .action{margin:1em 0 0; white-space:pre-wrap}
+  .character{margin:1.1em 0 0; padding-left:23ch; text-transform:uppercase}
+  .paren{padding-left:17ch; padding-right:5ch; margin:0}
+  .dialogue{padding-left:11ch; padding-right:15ch; white-space:pre-wrap; margin:0}
+  .transition{text-align:right; text-transform:uppercase; margin:1.2em 0 0}
+  .center{text-align:center; margin:.5em 0}
+  .lyric{font-style:italic; padding-left:11ch; margin:0}
+  .pagebreak{border-top:1px dashed var(--paper-line); margin:2.4em 0; position:relative}
+  .pagebreak::after{content:"page break"; position:absolute; right:0; top:-.9em; font-size:10px; color:var(--paper-faint); background:var(--paper); padding-left:6px}
+
+  /* ---- cheatsheet + save history ---- */
+  #sheet, #snaps{
+    position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:20;
+  }
+  #sheet.show, #snaps.show{display:flex}
+  .snaprow{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 4px; border-bottom:1px solid var(--line); font-size:13px}
+  .snaprow .meta{color:var(--muted); font-size:12px}
+  .snaprow button{flex:0 0 auto}
+  #snapslist .empty{color:var(--muted); font-size:13px; padding:10px 0}
+  .sheetbox{
+    background:var(--chrome); border:1px solid var(--line); border-radius:12px; max-width:560px; width:92%;
+    max-height:82vh; overflow-y:auto; padding:26px 30px; box-shadow:0 20px 60px rgba(0,0,0,.5);
+  }
+  .sheetbox h2{margin:0 0 4px; font-size:17px}
+  .sheetbox p.sub{margin:0 0 18px; color:var(--muted); font-size:13px}
+  .sheetbox table{width:100%; border-collapse:collapse; font-size:13px}
+  .sheetbox td{padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top}
+  .sheetbox td.k{width:42%; color:var(--accent)}
+  .sheetbox code{font-family:ui-monospace,Menlo,monospace; background:#1c1d21; padding:1px 5px; border-radius:4px; color:var(--editor-ink)}
+  .sheetbox .close{margin-top:18px}
+
+  /* ---- print / Save-as-PDF: show only the screenplay, real 12pt Courier ---- */
+  @media print{
+    header, #nav, .pane.left, .panehead, #sheet{display:none !important}
+    body, main, .panes, .pane, #previewWrap{
+      display:block; overflow:visible; height:auto; background:#fff; min-height:0;
+    }
+    #previewWrap{padding:0; container-type:normal}
+    .page{
+      width:auto; max-width:none; margin:0; padding:0; background:#fff !important;
+      box-shadow:none; border-radius:0; font-size:12pt !important; color:#000 !important;
+      /* reset paper-theme vars so every theme (incl. Night) prints black on white */
+      --paper-ink:#000 !important; --paper-faint:#555 !important; --paper-line:#c7c7c1 !important;
+    }
+    .titlepage{border-bottom:0; page-break-after:always; padding-top:3in}
+    .scene, .character{page-break-after:avoid}
+    .scene, .transition{page-break-before:auto}
+    @page{size:letter; margin:1in}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><b>Fountain</b><span>Workshop Editor</span><span class="ver">ansar.kz</span></div>
+  <button class="tool" id="navBtn" title="Toggle scene list">&#9776; Scenes</button>
+  <button class="tool" id="newBtn" title="Start a new blank script">New</button>
+  <button class="tool" id="openBtn">Open</button>
+  <button class="tool primary" id="saveBtn">Save</button>
+  <button class="tool" id="saveAsBtn">Save As</button>
+  <button class="tool" id="snapsBtn" title="Save history — the editor keeps your last 20 saves">History</button>
+  <button class="tool" id="exportBtn" title="Open a clean, printable script to Save as PDF">Export PDF</button>
+  <button class="tool" id="sampleBtn" title="Load a generic sample screenplay">Sample</button>
+  <button class="tool" id="colorBtn" title="Writing window theme">Theme</button>
+  <button class="tool" id="helpBtn" title="Fountain syntax">?</button>
+  <div class="spacer"></div>
+  <div class="status" id="status">&nbsp;</div>
+  <button class="tool" id="previewBtn" title="Show or hide the preview (focus on writing)">Preview</button>
+</header>
+
+<div id="colorPanel">
+  <h4>Writing window theme</h4>
+  <div class="swatches" id="swatches"></div>
+  <h4 style="margin-top:16px">Preview paper</h4>
+  <div class="swatches" id="previewSwatches"></div>
+</div>
+
+<main>
+  <aside id="nav"><h3>Scenes</h3><div id="navlist"></div></aside>
+  <div class="panes">
+    <section class="pane left" id="editorPane">
+      <div class="panehead">Write &middot; Fountain</div>
+      <textarea id="editor" spellcheck="true" autocomplete="off" autocapitalize="off"></textarea>
+    </section>
+    <div class="splitter" id="splitter" title="Drag to resize &middot; double-click to reset to 50/50"></div>
+    <section class="pane" id="previewPane">
+      <div class="panehead">Preview &middot; Screenplay</div>
+      <div id="previewWrap"><div class="page" id="page"></div></div>
+    </section>
+  </div>
+</main>
+
+<div id="sheet">
+  <div class="sheetbox">
+    <h2>Fountain in 60 seconds</h2>
+    <p class="sub">Fountain is the open plain-text screenplay format. Type plainly; these light rules do the formatting.</p>
+    <table>
+      <tr><td class="k">Scene heading</td><td>Line starts with <code>INT.</code> / <code>EXT.</code> (or force any line with a leading <code>.</code>)</td></tr>
+      <tr><td class="k">Action</td><td>Just write normally. Anything not matched below is action.</td></tr>
+      <tr><td class="k">Character</td><td>A line in ALL CAPS on its own, with dialogue beneath it. <code>JORDAN (V.O.)</code></td></tr>
+      <tr><td class="k">Parenthetical</td><td>A line in <code>(parentheses)</code> under a character.</td></tr>
+      <tr><td class="k">Dialogue</td><td>The line(s) right below a character, no blank line between.</td></tr>
+      <tr><td class="k">Transition</td><td>ALL CAPS ending in <code>TO:</code>, or force with <code>&gt;</code> at the start.</td></tr>
+      <tr><td class="k">Centered</td><td>Wrap in angle brackets: <code>&gt;THE END&lt;</code></td></tr>
+      <tr><td class="k">Emphasis</td><td><code>*italic*</code> &nbsp; <code>**bold**</code> &nbsp; <code>_underline_</code></td></tr>
+      <tr><td class="k">Page break</td><td>Three or more equals on a line: <code>===</code></td></tr>
+      <tr><td class="k">Title page</td><td>At the very top: <code>Title:</code> <code>Credit:</code> <code>Author:</code> then a blank line.</td></tr>
+    </table>
+    <p class="sub">Workshop build for ansar.kz, based on <a href="https://github.com/Rooftop-Pictures/fountain-editor" target="_blank" rel="noopener">Rooftop Pictures’ Fountain Editor</a> (MIT License).</p>
+    <button class="tool close" id="sheetClose">Close</button>
+  </div>
+</div>
+
+<div id="snaps">
+  <div class="sheetbox">
+    <h2>Save history</h2>
+    <p class="sub">The editor keeps your last 20 saves in this browser. Restoring puts a snapshot's text back in the editor — nothing touches your file until you Save. Your current text is snapshotted first, so a restore is always reversible.</p>
+    <div id="snapslist"></div>
+    <button class="tool close" id="snapsClose">Close</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const DEFAULT_SCRIPT = `Title: Untitled Screenplay
+Credit: Written by
+Author: Your Name Here
+Draft date: 2026
+
+FADE IN:
+
+EXT. CITY STREET - DAY
+
+A quiet morning. Steam curls from a coffee cart on the corner. FOOTSTEPS approach.
+
+JORDAN
+(checking a phone)
+Right on time. For once.
+
+Jordan pockets the phone and crosses the street, weaving between slow traffic.
+
+INT. CORNER CAFE - CONTINUOUS
+
+Warm light. The smell of fresh bread. A BARISTA glances up from the espresso machine.
+
+BARISTA
+The usual?
+
+JORDAN
+Surprise me.
+
+The barista grins and turns to the machine. Steam hisses.
+
+> DISSOLVE TO:
+
+INT. OFFICE - LATER
+
+Rows of empty desks. Jordan drops into a chair, coffee in hand, and the day begins.
+
+FADE OUT.
+`;
+
+const STORAGE_KEY = "fountain_editor_doc_v1";
+const NAME_KEY = "fountain_editor_name_v1";
+
+// Print-optimized stylesheet for the standalone Export PDF window (real 12pt Courier).
+const EXPORT_CSS = `
+  @page{ size: letter; margin: 1in; }
+  html,body{ margin:0; padding:0; background:#fff; }
+  body{ font-family:"Courier New",Courier,monospace; font-size:12pt; line-height:1.5; color:#000; }
+  .titlepage{ text-align:center; padding-top:3in; page-break-after:always; }
+  .titlepage .t{ font-weight:bold; text-transform:uppercase; letter-spacing:.04em; }
+  .titlepage .m{ margin:.25em 0; }
+  .titlepage .contact{ margin-top:2em; }
+  .page > *:first-child{ margin-top:0; }
+  .scene{ font-weight:bold; text-transform:uppercase; margin:1.5em 0 1em; page-break-after:avoid; }
+  .action{ margin:1em 0 0; white-space:pre-wrap; }
+  .character{ margin:1.1em 0 0; padding-left:2.2in; text-transform:uppercase; page-break-after:avoid; }
+  .paren{ padding-left:1.6in; padding-right:.5in; }
+  .dialogue{ padding-left:1in; padding-right:1.5in; white-space:pre-wrap; }
+  .transition{ text-align:right; text-transform:uppercase; margin:1.2em 0 0; }
+  .center{ text-align:center; margin:.5em 0; }
+  .lyric{ font-style:italic; padding-left:1in; }
+  .pagebreak{ page-break-after:always; }
+`;
+const el = document.getElementById.bind(document);
+const editor = el("editor");
+const page = el("page");
+const navlist = el("navlist");
+const statusEl = el("status");
+
+let fileHandle = null;
+let currentName = "untitled.fountain";
+let dirty = false;
+
+/* ---------- Fountain parser ---------- */
+function isBlank(l){ return (l||"").trim() === ""; }
+
+function parseTitlePage(lines){
+  // Title page: leading block of "Key: value" pairs, ended by a blank line.
+  // Only engage when the first line is a recognized title-page key, so a script that
+  // opens with "FADE IN:" (or any other colon line) isn't mistaken for a title page.
+  const TITLE_KEYS = /^(title|credit|author|authors|source|draft date|date|contact|copyright|notes|revision)\s*:/i;
+  if(!lines.length || !TITLE_KEYS.test(lines[0])) return {title:null, rest:lines};
+  const fields = {}; let i = 0; let lastKey = null;
+  for(; i < lines.length; i++){
+    const line = lines[i];
+    if(isBlank(line)){ i++; break; }
+    // Indented lines are continuations of the previous key's value (per spec),
+    // even if they happen to contain a colon.
+    if(/^\s/.test(line) && lastKey){ fields[lastKey] += (fields[lastKey] ? " " : "") + line.trim(); continue; }
+    const m = line.match(/^([^:]+):\s?(.*)$/);
+    if(m){ lastKey = m[1].trim().toLowerCase(); fields[lastKey] = m[2].trim(); }
+    else if(lastKey){ fields[lastKey] += (fields[lastKey] ? " " : "") + line.trim(); }
+  }
+  return {title:fields, rest:lines.slice(i)};
+}
+
+function parseBody(lines, lineOff){
+  const els = [];
+  const sceneRe = /^(INT|EXT|EST|INT\.?\/EXT|I\/E)[\.\s\/]/i;
+  const off = lineOff || 0;   // source-line offset (title-page lines above us) for pane sync
+  let i = 0;
+  while(i < lines.length){
+    const raw = lines[i];
+    const t = raw.trim();
+    const ln = off + i;
+
+    if(t === ""){ i++; continue; }
+    if(/^={3,}$/.test(t)){ els.push({type:"pagebreak", line:ln}); i++; continue; }
+    if(/^#+\s*/.test(t)){ els.push({type:"section", text:t.replace(/^#+\s*/,""), line:ln}); i++; continue; }
+    if(/^=(?!=)/.test(t)){ i++; continue; }                       // synopsis: not printed
+    if(t[0] === "!"){ els.push({type:"action", text:raw.replace(/^(\s*)!/,"$1"), line:ln}); i++; continue; }
+    if(t[0] === "~"){ els.push({type:"lyric", text:t.slice(1), line:ln}); i++; continue; }   // lyrics are always forced
+    if(/^>.*<$/.test(t)){ els.push({type:"center", text:t.replace(/^>/,"").replace(/<$/,"").trim(), line:ln}); i++; continue; }
+    if(t[0] === ">"){ els.push({type:"transition", text:t.replace(/^>/,"").trim(), line:ln}); i++; continue; }
+    if(t[0] === "." && t[1] !== "."){ els.push({type:"scene", text:t.slice(1).trim(), line:ln}); i++; continue; }
+    if(sceneRe.test(t)){ els.push({type:"scene", text:t, line:ln}); i++; continue; }
+    if(t === t.toUpperCase() && /[A-Z]/.test(t) && /TO:$/.test(t) && isBlank(lines[i+1])){
+      els.push({type:"transition", text:t, line:ln}); i++; continue;
+    }
+
+    // Character + dialogue block
+    const prevBlank = (i === 0) || isBlank(lines[i-1]);
+    const nextNonBlank = !isBlank(lines[i+1]);
+    const forced = t[0] === "@";
+    let cand = forced ? t.slice(1).trim() : t;
+    // Uppercase test applies to the name outside any (extension) — the spec allows
+    // lowercase extensions like JORDAN (cont'd).
+    const base = cand.replace(/\(.*?\)/g,"").replace(/\^\s*$/,"");
+    const looksChar = forced || (/[A-Za-z]/.test(base) && base === base.toUpperCase());
+    if(prevBlank && nextNonBlank && looksChar){
+      if(cand.endsWith("^")) cand = cand.slice(0,-1).trim();
+      els.push({type:"character", text:cand, line:ln});
+      i++;
+      while(i < lines.length && !isBlank(lines[i])){
+        const dl = lines[i].trim();
+        if(/^\(.*\)$/.test(dl)) els.push({type:"paren", text:dl, line:off+i});
+        else if(dl[0] === "~") els.push({type:"lyric", text:dl.slice(1), line:off+i});
+        else els.push({type:"dialogue", text:lines[i], line:off+i});
+        i++;
+      }
+      continue;
+    }
+
+    els.push({type:"action", text:raw, line:ln});
+    i++;
+  }
+  return els;
+}
+
+function fmt(s){
+  s = s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  s = s.replace(/\[\[[\s\S]*?\]\]/g,"");                          // notes: stripped (backstop; also stripped at source)
+  s = s.replace(/\\\*/g,"&#42;").replace(/\\_/g,"&#95;");         // \* and \_ print literally (spec escapes)
+  // Emphasis content must start and end on a non-space (spec rule) — lookbehind-free
+  // so the whole script still parses on older engines.
+  s = s.replace(/\*\*\*(\S(?:.*?\S)??)\*\*\*/g,"<b><i>$1</i></b>");
+  s = s.replace(/\*\*(\S(?:.*?\S)??)\*\*/g,"<b>$1</b>");
+  s = s.replace(/\*(\S(?:.*?\S)??)\*/g,"<i>$1</i>");
+  s = s.replace(/_(\S(?:.*?\S)??)_/g,"<u>$1</u>");
+  return s;
+}
+
+// Parse source into the screenplay HTML + metadata. Shared by the live preview and PDF export.
+function buildDoc(src){
+  let lines = src.replace(/^\uFEFF/,"")                          // strip UTF-8 BOM
+                 .replace(/\r\n?/g,"\n")
+                 .replace(/\/\*[\s\S]*?\*\//g,"")                  // boneyard
+                 .replace(/\[\[(?:(?!\n[ \t]*\n)[\s\S])*?\]\]/g,"") // notes: span lines but never a blank line, so an unclosed [[ can't swallow later paragraphs
+                 .split("\n");
+  const {title, rest} = parseTitlePage(lines);
+  // Line numbers on elements are indices into the normalized source. They match the
+  // textarea exactly except after a stripped multi-line boneyard/note (rare; sync
+  // lands a few lines off there and self-corrects at the next element).
+  const els = parseBody(rest, lines.length - rest.length);
+
+  let html = "";
+  let titleText = "";
+  const byline = title && (title.author || title.authors);
+  const draft = title && (title["draft date"] || title.date);
+  if(title && (title.title || title.credit || byline || title.source || draft || title.contact)){
+    html += '<div class="titlepage">';
+    if(title.title){ html += '<div class="t">'+fmt(title.title)+"</div>"; titleText = title.title.replace(/[*_]/g,"").trim(); }
+    if(title.credit) html += '<div class="m">'+fmt(title.credit)+"</div>";
+    if(byline) html += '<div class="m">'+fmt(byline)+"</div>";
+    if(title.source) html += '<div class="m">'+fmt(title.source)+"</div>";
+    if(draft) html += '<div class="m">'+fmt(draft)+"</div>";
+    if(title.contact) html += '<div class="contact">'+fmt(title.contact)+"</div>";
+    html += "</div>";
+  }
+
+  const scenes = [];
+  let sceneN = 0;
+  for(const e of els){
+    switch(e.type){
+      case "scene":
+        sceneN++;
+        scenes.push({n:sceneN, text:e.text, id:"scene-"+sceneN, section:false, line:e.line});
+        html += '<div class="scene" id="scene-'+sceneN+'" data-line="'+e.line+'">'+fmt(e.text)+"</div>";
+        break;
+      case "section":
+        scenes.push({text:e.text, section:true});
+        break;
+      case "action":      html += '<div class="action" data-line="'+e.line+'">'+fmt(e.text)+"</div>"; break;
+      case "character":   html += '<div class="character" data-line="'+e.line+'">'+fmt(e.text)+"</div>"; break;
+      case "paren":       html += '<div class="paren" data-line="'+e.line+'">'+fmt(e.text)+"</div>"; break;
+      case "dialogue":    html += '<div class="dialogue" data-line="'+e.line+'">'+fmt(e.text)+"</div>"; break;
+      case "transition":  html += '<div class="transition" data-line="'+e.line+'">'+fmt(e.text)+"</div>"; break;
+      case "center":      html += '<div class="center" data-line="'+e.line+'">'+fmt(e.text)+"</div>"; break;
+      case "lyric":       html += '<div class="lyric" data-line="'+e.line+'">'+fmt(e.text)+"</div>"; break;
+      case "pagebreak":   html += '<div class="pagebreak" data-line="'+e.line+'"></div>'; break;
+    }
+  }
+
+  const words = rest.join(" ").replace(/[^A-Za-z0-9'\-]+/g," ").trim().split(/\s+/).filter(Boolean).length;
+  return {html, scenes, sceneCount:sceneN, words, titleText};
+}
+
+function render(src){
+  const d = buildDoc(src);
+  page.innerHTML = d.html;
+  buildNav(d.scenes);
+  return {sceneCount:d.sceneCount, words:d.words};
+}
+
+// Export: open a standalone, script-only document and hand it to the browser's Save-as-PDF.
+function exportPDF(){
+  const d = buildDoc(editor.value);
+  const win = window.open("", "_blank");
+  if(!win){ flash("Allow pop-ups, then Export again"); return; }
+  const docTitle = (d.titleText || (currentName || "script").replace(/\.[^.]+$/,"")).replace(/[*_]/g,"");
+  win.document.write(
+    '<!doctype html><html><head><meta charset="utf-8"><title>'+escapeAttr(docTitle)+
+    '</title><style>'+EXPORT_CSS+'</style></head><body><div class="page">'+d.html+'</div></body></html>'
+  );
+  win.document.close();
+  win.focus();
+  setTimeout(function(){ try{ win.print(); }catch(e){} }, 400);
+}
+
+function buildNav(scenes){
+  navlist.innerHTML = "";
+  if(!scenes.length){ navlist.innerHTML = '<div style="padding:6px 16px;color:var(--muted);font-size:12px">No scenes yet</div>'; return; }
+  for(const s of scenes){
+    const b = document.createElement("button");
+    if(s.section){ b.className = "navitem section"; b.textContent = s.text; }
+    else {
+      b.className = "navitem";
+      b.innerHTML = '<span class="num">'+s.n+'</span>'+escapeText(s.text);
+      b.onclick = () => {
+        const target = el(s.id); if(!target) return;
+        // jump BOTH panes to the scene (view only — the caret stays put)
+        guardPreview = Date.now();
+        previewWrap.scrollTop = Math.max(0, previewYOf(target) - 14);
+        editor.scrollTop = Math.max(0, textYAt(lineStartIndex(+target.dataset.line)) - editor.clientHeight*0.12);
+      };
+    }
+    navlist.appendChild(b);
+  }
+}
+function escapeText(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function escapeAttr(s){ return escapeText(s).replace(/"/g,"&quot;"); }
+
+/* ---------- refresh + autosave ---------- */
+let saveTimer = null;
+function refresh(){
+  const stats = render(editor.value);
+  cachePreviewEls();
+  setStatus(stats);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try{ localStorage.setItem(STORAGE_KEY, editor.value); localStorage.setItem(NAME_KEY, currentName); }catch(e){}
+  }, 400);
+}
+function setStatus(stats){
+  const name = currentName + (dirty ? " *" : "");
+  statusEl.innerHTML = '<b>'+stats.sceneCount+'</b> scenes &middot; <b>'+stats.words+'</b> words &nbsp;|&nbsp; '+escapeText(name);
+}
+
+/* ---------- save snapshots (seatbelt: last 20 saves, restorable) ---------- */
+const SNAPS_KEY = "fountain_snapshots_v1";
+const SNAPS_MAX = 20;
+function loadSnaps(){ try{ return JSON.parse(localStorage.getItem(SNAPS_KEY)) || []; }catch(e){ return []; } }
+function takeSnapshot(){
+  try{
+    const snaps = loadSnaps();
+    if(snaps.length && snaps[snaps.length-1].text === editor.value) return;   // nothing new to keep
+    snaps.push({ts:Date.now(), name:currentName, text:editor.value});
+    while(snaps.length > SNAPS_MAX) snaps.shift();
+    try{ localStorage.setItem(SNAPS_KEY, JSON.stringify(snaps)); }
+    catch(e){ snaps.splice(0, Math.ceil(snaps.length/2)); localStorage.setItem(SNAPS_KEY, JSON.stringify(snaps)); }  // storage full: drop oldest half
+  }catch(e){}
+}
+function renameLastSnapshot(name){
+  // The snapshot is taken before the save dialog completes, so on a first save it
+  // carries the old name — patch it once the real filename is known.
+  try{
+    const snaps = loadSnaps();
+    if(snaps.length && snaps[snaps.length-1].text === editor.value){
+      snaps[snaps.length-1].name = name;
+      localStorage.setItem(SNAPS_KEY, JSON.stringify(snaps));
+    }
+  }catch(e){}
+}
+function snapTime(ts){
+  return new Date(ts).toLocaleString([], {month:"short", day:"numeric", hour:"numeric", minute:"2-digit"});
+}
+function buildSnapsList(){
+  const list = el("snapslist");
+  const snaps = loadSnaps();
+  list.innerHTML = "";
+  if(!snaps.length){ list.innerHTML = '<div class="empty">No saves yet. A snapshot is kept every time you Save.</div>'; return; }
+  snaps.slice().reverse().forEach((s, ri) => {
+    const idx = snaps.length - 1 - ri;
+    const words = buildDoc(s.text).words;   // same count as the status bar, so the numbers agree
+    const row = document.createElement("div");
+    row.className = "snaprow";
+    const info = document.createElement("div");
+    info.innerHTML = "<div>" + escapeText(snapTime(s.ts)) + "</div><div class=\"meta\">" + escapeText(s.name || "untitled") + " &middot; " + words + " words</div>";
+    const btn = document.createElement("button");
+    btn.className = "tool"; btn.type = "button"; btn.textContent = "Restore";
+    btn.onclick = () => restoreSnapshot(idx);
+    row.appendChild(info); row.appendChild(btn);
+    list.appendChild(row);
+  });
+}
+function restoreSnapshot(idx){
+  const snaps = loadSnaps();
+  const s = snaps[idx]; if(!s) return;
+  if(!confirm("Replace the current text with the save from " + snapTime(s.ts) + "?\n\nYour current text is kept as its own snapshot, so this is reversible.")) return;
+  takeSnapshot();                              // make the restore itself reversible
+  editor.value = s.text; dirty = true;         // file on disk is untouched until you Save
+  refresh(); queueEditorDrive();
+  el("snaps").classList.remove("show");
+  flash("Restored save from " + snapTime(s.ts));
+}
+
+/* ---------- file IO ---------- */
+const PICKER_TYPES = [{description:"Fountain screenplay", accept:{"text/plain":[".fountain",".txt",".spmd"]}}];
+
+// First save of a new script: suggest a filename from the title page instead of "untitled".
+function suggestedFileName(){
+  if(currentName && currentName !== "untitled.fountain") return currentName;
+  const t = buildDoc(editor.value).titleText;
+  if(!t) return currentName || "script.fountain";
+  const slug = t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")   // é → e
+               .replace(/['’]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,60);
+  return (slug || "script") + ".fountain";
+}
+
+async function openFile(){
+  try{
+    if(window.showOpenFilePicker){
+      const [h] = await window.showOpenFilePicker({types:PICKER_TYPES, excludeAcceptAllOption:false});
+      const f = await h.getFile();
+      editor.value = await f.text();
+      fileHandle = h; currentName = h.name; dirty = false;
+      refresh(); flash("Opened "+h.name);
+    } else {
+      legacyOpen();
+    }
+  }catch(e){ if(e.name !== "AbortError") flash("Open cancelled"); }
+}
+function legacyOpen(){
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = ".fountain,.txt,.spmd,text/plain";
+  inp.onchange = () => {
+    const f = inp.files[0]; if(!f) return;
+    const r = new FileReader();
+    r.onload = () => { editor.value = r.result; fileHandle = null; currentName = f.name; dirty = false; refresh(); flash("Opened "+f.name); };
+    r.readAsText(f);
+  };
+  inp.click();
+}
+
+// Saves are serialized: rapid Save-Save can't open two write streams on the same file
+// (that collision leaves .crswap orphans and throws NoModificationAllowedError).
+let saveInFlight = false, saveQueued = false;
+async function saveFile(){
+  if(saveInFlight){ saveQueued = true; return; }   // fold into the save already running
+  saveInFlight = true;
+  takeSnapshot();
+  try{
+    if(fileHandle && fileHandle.createWritable){
+      await writeCurrentFile();
+      dirty = false; refresh(); flash("Saved to "+currentName);
+    } else {
+      await saveAs();
+    }
+  }catch(e){ if(e.name !== "AbortError"){ console.error("Save failed:", e); flash("Save failed ("+(e && e.name || "unknown")+")"); } }
+  finally{
+    saveInFlight = false;
+    if(saveQueued){ saveQueued = false; saveFile(); }
+  }
+}
+async function writeCurrentFile(){
+  try{
+    const w = await fileHandle.createWritable();
+    await w.write(editor.value); await w.close();
+  }catch(e){
+    if(e.name !== "NoModificationAllowedError") throw e;
+    // File transiently locked (a prior swap finalizing, or cloud sync touching it) — one retry.
+    await new Promise(r => setTimeout(r, 500));
+    const w = await fileHandle.createWritable();
+    await w.write(editor.value); await w.close();
+  }
+}
+async function saveAs(){
+  takeSnapshot();
+  try{
+    if(window.showSaveFilePicker){
+      const h = await window.showSaveFilePicker({suggestedName:suggestedFileName(), types:PICKER_TYPES});
+      const w = await h.createWritable();
+      await w.write(editor.value); await w.close();
+      fileHandle = h; currentName = h.name; renameLastSnapshot(h.name); dirty = false; refresh(); flash("Saved "+h.name);
+    } else {
+      legacyDownload();
+    }
+  }catch(e){ if(e.name !== "AbortError"){ console.error("Save As failed:", e); flash("Save cancelled ("+(e && e.name || "unknown")+")"); } }
+}
+function legacyDownload(){
+  takeSnapshot();
+  // No save dialog in this browser (Firefox/Safari): we pick the download name, so we
+  // also KNOW it — adopt it as the working filename instead of staying "untitled".
+  const name = suggestedFileName();
+  const blob = new Blob([editor.value], {type:"text/plain"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  a.click(); URL.revokeObjectURL(a.href);
+  currentName = name; renameLastSnapshot(name);
+  dirty = false; refresh(); flash("Downloaded "+name);
+}
+
+let flashTimer = null;
+function flash(msg){
+  clearTimeout(flashTimer);
+  statusEl.innerHTML = '<b style="color:var(--accent)">'+escapeText(msg)+"</b>";
+  flashTimer = setTimeout(refresh, 1600);
+}
+
+/* ---------- wiring ---------- */
+editor.addEventListener("input", () => { dirty = true; refresh(); queueEditorDrive(); });
+editor.addEventListener("keydown", (e) => {
+  if((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s"){ e.preventDefault(); saveFile(); }
+});
+el("openBtn").onclick = openFile;
+el("saveBtn").onclick = saveFile;
+el("saveAsBtn").onclick = saveAs;
+el("exportBtn").onclick = exportPDF;
+el("navBtn").onclick = () => el("nav").classList.toggle("hidden");
+
+/* ---------- resizable split between editor and preview ---------- */
+const SPLIT_KEY = "fountain_split_pct_v1";
+const panesEl = document.querySelector(".panes");
+const editorPane = el("editorPane");
+const splitter = el("splitter");
+let dragging = false;
+
+function applySplit(pct){
+  pct = Math.min(80, Math.max(20, pct));
+  editorPane.style.flex = "0 0 " + pct + "%";
+  return pct;
+}
+splitter.addEventListener("mousedown", (e) => {
+  dragging = true; document.body.classList.add("dragging"); e.preventDefault();
+});
+document.addEventListener("mousemove", (e) => {
+  if(!dragging) return;
+  const r = panesEl.getBoundingClientRect();
+  applySplit((e.clientX - r.left) / r.width * 100);
+});
+document.addEventListener("mouseup", () => {
+  if(!dragging) return;
+  dragging = false; document.body.classList.remove("dragging");
+  const pct = parseFloat(editorPane.style.flex.split(" ")[2]);
+  try{ localStorage.setItem(SPLIT_KEY, pct); }catch(e){}
+});
+splitter.addEventListener("dblclick", () => {
+  applySplit(50);
+  try{ localStorage.setItem(SPLIT_KEY, 50); }catch(e){}
+});
+/* ---------- hide/show the preview pane (writing focus mode) ---------- */
+const PREVIEW_HIDDEN_KEY = "fountain_preview_hidden_v1";
+const previewBtn = el("previewBtn");
+let previewHidden = false;
+
+function setPreviewHidden(hidden){
+  previewHidden = hidden;
+  el("previewPane").style.display = hidden ? "none" : "";
+  el("splitter").style.display = hidden ? "none" : "";
+  previewBtn.classList.toggle("off", hidden);
+  if(hidden){
+    editorPane.style.flex = "1 1 auto";
+  } else {
+    let saved = parseFloat(localStorage.getItem(SPLIT_KEY));
+    applySplit(isNaN(saved) ? 50 : saved);
+  }
+  try{ localStorage.setItem(PREVIEW_HIDDEN_KEY, hidden ? "1" : "0"); }catch(e){}
+}
+previewBtn.onclick = () => {
+  setPreviewHidden(!previewHidden);
+  if(!previewHidden) queueEditorDrive();   // preview was frozen while hidden — snap it back to the caret
+};
+
+(function initSplit(){
+  let saved = parseFloat(localStorage.getItem(SPLIT_KEY));
+  applySplit(isNaN(saved) ? 50 : saved);
+  setPreviewHidden(localStorage.getItem(PREVIEW_HIDDEN_KEY) === "1");
+})();
+
+/* ---------- typewriter scrolling + married panes ----------
+   While you type or move the cursor, the editor drives: the active line is held
+   at the lower-third eyeline and the preview follows to the matching element.
+   Scrolling the preview by hand makes the preview drive: the writing view mirrors
+   it (the caret never moves). Typing again snaps everything back to the caret. */
+const previewWrap = el("previewWrap");
+const EYELINE = 0.66;    // typing: active line held this far down the pane
+const FINDLINE = 0.45;   // browsing: cross-pane anchor point
+let guardPreview = 0;    // timestamp of our own programmatic preview scrolls
+let previewEls = [];
+
+// Hidden mirror of the textarea — converts a character index to a pixel Y.
+// (Textareas expose no caret coordinates, and soft-wrapped lines defeat line math.)
+const mirror = document.createElement("div");
+const mirrorMark = document.createElement("span");
+mirror.style.cssText = "position:absolute;visibility:hidden;left:-99999px;top:0;white-space:pre-wrap;word-wrap:break-word;box-sizing:border-box;";
+mirrorMark.textContent = "​";
+document.body.appendChild(mirror);
+
+function textYAt(charIndex){
+  const cs = getComputedStyle(editor);
+  ["fontFamily","fontSize","lineHeight","letterSpacing","tabSize","paddingTop","paddingLeft","paddingRight"].forEach(p => { mirror.style[p] = cs[p]; });
+  mirror.style.width = editor.clientWidth + "px";
+  mirror.textContent = editor.value.slice(0, charIndex);
+  mirror.appendChild(mirrorMark);
+  return mirrorMark.offsetTop;
+}
+function caretLine(){
+  const upto = editor.value.slice(0, editor.selectionStart);
+  let n = 0;
+  for(let i = 0; i < upto.length; i++) if(upto[i] === "\n") n++;
+  return n;
+}
+function lineStartIndex(line){
+  const v = editor.value; let idx = 0;
+  for(let n = 0; n < line; n++){
+    const nl = v.indexOf("\n", idx);
+    if(nl < 0) break;
+    idx = nl + 1;
+  }
+  return idx;
+}
+function cachePreviewEls(){ previewEls = Array.from(page.querySelectorAll("[data-line]")); }
+function elementForLine(line){
+  let best = null;
+  for(const e of previewEls){
+    if(+e.dataset.line <= line) best = e; else break;
+  }
+  return best;
+}
+function previewYOf(elm){
+  return elm.getBoundingClientRect().top - previewWrap.getBoundingClientRect().top + previewWrap.scrollTop;
+}
+
+function editorDrives(){
+  const h = editor.clientHeight;
+  const y = textYAt(editor.selectionStart);
+  const rel = y - editor.scrollTop;
+  if(rel > h*EYELINE) editor.scrollTop = Math.max(0, y - h*EYELINE);          // typing forward: pin to eyeline
+  else if(rel < h*0.12) editor.scrollTop = Math.max(0, y - h*0.12);           // moving up: keep context above
+  const match = elementForLine(caretLine());
+  guardPreview = Date.now();
+  previewWrap.scrollTop = match ? Math.max(0, previewYOf(match) - previewWrap.clientHeight*EYELINE) : 0;
+}
+let driveRaf = null;
+function queueEditorDrive(){
+  if(driveRaf) return;
+  driveRaf = requestAnimationFrame(() => { driveRaf = null; editorDrives(); });
+}
+
+previewWrap.addEventListener("scroll", () => {
+  if(Date.now() - guardPreview < 250) return;   // our own scroll, not the user's
+  if(!previewEls.length) return;
+  const anchor = previewWrap.getBoundingClientRect().top + previewWrap.clientHeight*FINDLINE;
+  let best = null;
+  for(const e of previewEls){
+    if(e.getBoundingClientRect().top <= anchor) best = e; else break;
+  }
+  if(!best) return;
+  editor.scrollTop = Math.max(0, textYAt(lineStartIndex(+best.dataset.line)) - editor.clientHeight*FINDLINE);
+});
+
+editor.addEventListener("keyup", (e) => {
+  if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","PageUp","PageDown","Home","End"].includes(e.key)) queueEditorDrive();
+});
+editor.addEventListener("mouseup", queueEditorDrive);
+el("sampleBtn").onclick = () => {
+  if(dirty && !confirm("Replace the current text with the sample screenplay? Unsaved changes will be lost.")) return;
+  editor.value = DEFAULT_SCRIPT; fileHandle = null; currentName = "sample.fountain"; dirty = false; refresh(); flash("Loaded sample");
+};
+el("newBtn").onclick = () => {
+  if(dirty && !confirm("Start a new blank script? Unsaved changes will be lost.")) return;
+  editor.value = ""; fileHandle = null; currentName = "untitled.fountain"; dirty = false; refresh(); editor.focus(); flash("New document");
+};
+
+/* ---------- writing-window color themes (self-contained presets) ---------- */
+const EDITOR_BG_KEY = "fountain_editor_bg_v1", EDITOR_INK_KEY = "fountain_editor_ink_v1";
+const EDITOR_BG_DEFAULT = "#202127", EDITOR_INK_DEFAULT = "#d6d7db";
+const THEMES = [
+  {name:"Default", bg:"#202127", ink:"#d6d7db"},
+  {name:"Black",    bg:"#0a0a0b", ink:"#e4e4e6"},
+  {name:"Slate",    bg:"#1e2530", ink:"#cdd6e5"},
+  {name:"Forest",   bg:"#14201a", ink:"#bfe0c4"},
+  {name:"Paper",    bg:"#f6f1e7", ink:"#2b2b2b"},
+  {name:"Sepia",    bg:"#f4ecd8", ink:"#5b4636"},
+  {name:"White",    bg:"#ffffff", ink:"#1a1a1a"}
+];
+const colorPanel = el("colorPanel"), colorBtn = el("colorBtn"), swatchWrap = el("swatches");
+function setRootVar(name, val){ document.documentElement.style.setProperty(name, val); }
+function readColor(key, fallback){ try{ return localStorage.getItem(key) || fallback; }catch(e){ return fallback; } }
+function markActiveSwatch(bg){
+  const b = String(bg).toLowerCase();
+  swatchWrap.querySelectorAll(".swatch").forEach(s => s.classList.toggle("active", s.dataset.bg.toLowerCase() === b));
+}
+function applyEditorColors(bg, ink){ setRootVar("--editor-bg", bg); setRootVar("--editor-ink", ink); markActiveSwatch(bg); }
+function selectTheme(t){
+  applyEditorColors(t.bg, t.ink);
+  try{ localStorage.setItem(EDITOR_BG_KEY, t.bg); localStorage.setItem(EDITOR_INK_KEY, t.ink); }catch(e){}
+}
+(function buildSwatches(){
+  THEMES.forEach(t => {
+    const b = document.createElement("button");
+    b.className = "swatch"; b.type = "button";
+    b.style.background = t.bg; b.style.color = t.ink; b.dataset.bg = t.bg;
+    b.innerHTML = "<span>" + t.name + "</span><span class=\"aa\">Aa</span>";
+    b.onclick = () => selectTheme(t);
+    swatchWrap.appendChild(b);
+  });
+})();
+
+/* ---------- preview paper themes (screen only — PDF export always prints black on white) ---------- */
+const PAPER_KEY = "fountain_paper_theme_v1";
+const PAPER_THEMES = [
+  {name:"White", paper:"#fbfbf9", ink:"#17171a", faint:"#8a8a86", line:"#d8d8d2"},
+  {name:"Cream", paper:"#f2e9d5", ink:"#3a3226", faint:"#988c72", line:"#ddd0b2"},
+  {name:"Dim",   paper:"#cfcfc9", ink:"#26262a", faint:"#6f6f6a", line:"#b3b3ac"},
+  {name:"Night", paper:"#1f2026", ink:"#d8d8d4", faint:"#8b8b90", line:"#3a3b42"}
+];
+const paperWrap = el("previewSwatches");
+function applyPaperTheme(t){
+  setRootVar("--paper", t.paper); setRootVar("--paper-ink", t.ink);
+  setRootVar("--paper-faint", t.faint); setRootVar("--paper-line", t.line);
+  paperWrap.querySelectorAll(".swatch").forEach(s => s.classList.toggle("active", s.dataset.name === t.name));
+}
+function selectPaperTheme(t){
+  applyPaperTheme(t);
+  try{ localStorage.setItem(PAPER_KEY, t.name); }catch(e){}
+}
+(function buildPaperSwatches(){
+  PAPER_THEMES.forEach(t => {
+    const b = document.createElement("button");
+    b.className = "swatch"; b.type = "button";
+    b.style.background = t.paper; b.style.color = t.ink; b.dataset.name = t.name;
+    b.innerHTML = "<span>" + t.name + "</span><span class=\"aa\">Aa</span>";
+    b.onclick = () => selectPaperTheme(t);
+    paperWrap.appendChild(b);
+  });
+})();
+colorBtn.onclick = (e) => {
+  e.stopPropagation();
+  if(colorPanel.classList.contains("show")){ colorPanel.classList.remove("show"); return; }
+  markActiveSwatch(readColor(EDITOR_BG_KEY, EDITOR_BG_DEFAULT));
+  const r = colorBtn.getBoundingClientRect();
+  colorPanel.style.left = Math.min(r.left, window.innerWidth - 268) + "px";
+  colorPanel.style.top = (r.bottom + 6) + "px";
+  colorPanel.classList.add("show");
+};
+document.addEventListener("click", (e) => {
+  if(colorPanel.classList.contains("show") && !colorPanel.contains(e.target) && e.target !== colorBtn){
+    colorPanel.classList.remove("show");
+  }
+});
+el("helpBtn").onclick = () => el("sheet").classList.add("show");
+el("sheetClose").onclick = () => el("sheet").classList.remove("show");
+el("sheet").onclick = (e) => { if(e.target.id === "sheet") el("sheet").classList.remove("show"); };
+el("snapsBtn").onclick = () => { buildSnapsList(); el("snaps").classList.add("show"); };
+el("snapsClose").onclick = () => el("snaps").classList.remove("show");
+el("snaps").onclick = (e) => { if(e.target.id === "snaps") el("snaps").classList.remove("show"); };
+window.addEventListener("beforeunload", (e) => { if(dirty){ e.preventDefault(); e.returnValue = ""; } });
+
+/* ---------- boot ---------- */
+(function boot(){
+  applyEditorColors(readColor(EDITOR_BG_KEY, EDITOR_BG_DEFAULT), readColor(EDITOR_INK_KEY, EDITOR_INK_DEFAULT));
+  applyPaperTheme(PAPER_THEMES.find(t => t.name === readColor(PAPER_KEY, "White")) || PAPER_THEMES[0]);
+  let saved = null;
+  try{ saved = localStorage.getItem(STORAGE_KEY); }catch(e){}
+  try{ const n = localStorage.getItem(NAME_KEY); if(n) currentName = n; }catch(e){}
+  editor.value = (saved && saved.trim()) ? saved : DEFAULT_SCRIPT;
+  refresh();
+})();
+</script>
+</body>
+</html>
